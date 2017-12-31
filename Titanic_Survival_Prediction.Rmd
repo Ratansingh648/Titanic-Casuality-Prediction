@@ -1,0 +1,338 @@
+---
+title: "Titanic - Casuality Prediction"
+author: "Ratan Singh"
+date: "7 December 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction to Dataset
+
+This files contains a basic analysis of classification of Poisonous and Non Poisonous Mushrooms. This dataset is taken from <https://kaggle.com>. This dataset is divided into two different sets as **train** and  **test**. Training Dataset contains 891 observation with 12 different attributes. With this data we are aiming to train a machine learning model which would predict the survival of testing dataset of 418 observation.
+Before classifying the dataset, we would analyze the effect of various attributes on the target variables. I am performing analysis on dataset stored on my local machine. Before processing the data, Lets analyze the features of the training datasets. We want to target the prediction of survival of the passengers.
+
+
+```{r dataset}
+trainData <- read.csv("C:/Users/Ratan Singh/Desktop/R Markdown Files/Titanic Prediction/train.csv",header = TRUE,stringsAsFactors = FALSE)
+testData <- read.csv("C:/Users/Ratan Singh/Desktop/R Markdown Files/Titanic Prediction/test.csv",header = TRUE,stringsAsFactors = FALSE)
+dim(trainData)
+summary(trainData)
+
+```
+
+## Selecting the features
+
+Now Let's recall the details of the incident. When Titanic tragedy took place, it was time of dinner and most of the people were out of the cabins. So basically the parameter **Cabin** Doesn't make any effect on the survival chances of the people.However if it were a night time when people were asleep, then definitely parameter **Cabin** would have played a crucial role as people with lower cabins would have met their fate first. Also while evacuating the people, they were giving preference to following facts:
+**(1.) Children over the Adults**
+**(2.) Women over the Men**
+**(3.) Class of the Passengers**
+
+Considering Above factors, the parameters **PassengerId, Name, Ticket, Fare, Cabin** and **Embarked** doesn't any useful information about the survival rate. Now to confirm this hypothesis, we can follow two approaches. We could either compute the correlation of different attributes with the survicval or analyze the attributes graphically to infer their dependence on survival. Before doing this, we must remove above attributes which are useless to our modeling. Also we need to take care of any misisng data.
+
+```{r Cleaning Data}
+cleanedTrainData <- trainData[,-c(1,4,9,10,11,12)]
+cleanedTestData <- testData[,-c(1,3,8,9,10,11)]
+```
+
+Now to check the missing values of the cleaned dataset, we use **is.na()** function. This function when applied to a dataframe returns a boolean dataframe with missing values having bool value **True** and rest as  **False**. Now we take columnwise sum of dataset so as to get which column contains how many missing values.
+
+```{r finding Data}
+trainMissingValues <- is.na(cleanedTrainData)
+print(apply(trainMissingValues,2,sum))
+testMissingValues <- is.na(cleanedTestData)
+print(apply(testMissingValues,2,sum))
+
+```
+
+Here we can see that only feature that contains missing value is **Age**. One approach is to remove those observations. However their are 177 cases where age is missing and removing them from dataset of 891 observations will result into loss of data. Let's analyze the pattern of age of the passenger.
+
+```{r plotting Data}
+cleanedTrainData$FamilyClass = (cleanedTrainData$SibSp + cleanedTrainData$Parch)*cleanedTrainData$Pclass
+cleanedTestData$FamilyClass = (cleanedTestData$SibSp + cleanedTestData$Parch)*cleanedTestData$Pclass
+
+plot(density(cleanedTrainData[cleanedTrainData$Sex == "male",]$Age,na.rm = TRUE),xlab = "Age",ylab = "Probability",main = "Male Age distribution")
+plot(density(cleanedTrainData[cleanedTrainData$Sex == "female",]$Age,na.rm = TRUE),xlab = "Age",ylab = "Probability",main = "Female Age distribution")
+
+```
+
+Here we can see that age distribution is slightly right skewed for both male and female. Hence assigning missing values to the median would be a good approximation than the mean.However there exists a difference in median of both male and female.
+
+
+```{r assigning missing Data}
+medianMaleAgeTrain <- median(cleanedTrainData[cleanedTrainData$Sex == "male",]$Age,na.rm = TRUE)
+medianFemaleAgeTrain <- median(cleanedTrainData[cleanedTrainData$Sex == "female",]$Age,na.rm = TRUE)
+medianMaleAgeTest <- median(cleanedTestData[cleanedTestData$Sex == "male",]$Age,na.rm = TRUE)
+medianFemaleAgeTest <- median(cleanedTestData[cleanedTestData$Sex == "female",]$Age,na.rm = TRUE)
+
+cleanedTrainData[which(cleanedTrainData$Sex == "male" & is.na(cleanedTrainData$Age)),]$Age <- medianMaleAgeTrain
+cleanedTrainData[which(cleanedTrainData$Sex == "female" & is.na(cleanedTrainData$Age)),]$Age <- medianFemaleAgeTrain
+cleanedTestData[which(cleanedTestData$Sex == "male" & is.na(cleanedTestData$Age)),]$Age <- medianMaleAgeTest
+cleanedTestData[which(cleanedTestData$Sex == "female" & is.na(cleanedTestData$Age)),]$Age <- medianFemaleAgeTest
+
+```
+
+Now we have removed the missing data from the both of datasets. Let's verify the effect of the features on target variable. To do so, we are using Bayesian method. First of all, let's evaluate the general proportion of people who survived.
+
+```{r general proportion}
+prop_genral <- prop.table(table(cleanedTrainData$Survived))
+print(prop_genral)
+```
+In general, we can see that 61.61% people died and only 38.38% survived the incident. According to Bayesian Rule, if a feature is correlated with survival rate then it must affect the general probability significantly. Now let's analyze the effect of gender on the survival rate.  
+
+```{r proportion by sex}
+prop_male <- prop.table(table(cleanedTrainData[cleanedTrainData$Sex == "male",]$Survived))
+print(prop_male)
+
+prop_female <- prop.table(table(cleanedTrainData[cleanedTrainData$Sex == "female",]$Survived))
+print(prop_female)
+
+```
+
+Here we can see that that gender affects the probability of survival greatly as there is a deviation of probability of survival for males and females.Therefore gender is a prominent attribute while considering the survival rate. Now let's analyze the effect of Age on the survival rate. We are classifying the people below and above 18 years. 
+
+```{r proportion by Age}
+prop_kids <- prop.table(table(cleanedTrainData[cleanedTrainData$Age < 18,]$Survived))
+print(prop_kids)
+
+prop_adult <- prop.table(table(cleanedTrainData[cleanedTrainData$Age >= 18,]$Survived))
+print(prop_adult)
+```
+
+
+
+```{r proportion by class}
+prop_class_1 <- prop.table(table(cleanedTrainData[cleanedTrainData$Pclass == 1,]$Survived))
+print(prop_class_1)
+
+prop_class_2 <- prop.table(table(cleanedTrainData[cleanedTrainData$Pclass == 2,]$Survived))
+print(prop_class_2)
+
+prop_class_3 <- prop.table(table(cleanedTrainData[cleanedTrainData$Pclass == 3,]$Survived))
+print(prop_class_3)
+
+```
+Here we can see that Survival rate of the first class passengers is very high as compared to the general survival rate. Similarly the survival rate of third class passengers is quiet low as compared to the normal death rate.
+
+```{r proportion by parent and Child}
+
+prop_no_Parch <- prop.table(table(cleanedTrainData[cleanedTrainData$Parch == 0 ,]$Survived))
+print(prop_no_Parch)
+
+prop_with_Parch <- prop.table(table(cleanedTrainData[cleanedTrainData$Parch > 0,]$Survived))
+print(prop_with_Parch)
+
+```
+Similarly we can see that presence of Parent and Child affects the probability of survival rate of passengers. Also Presence of Siblings and spouse affects the survival rate of the passengers Which is visible rom the script below.
+
+```{r proportion siblings and Spouse}
+
+prop_no_SibSpo <- prop.table(table(cleanedTrainData[cleanedTrainData$SibSp == 0 ,]$Survived))
+print(prop_no_SibSpo)
+
+prop_with_SibSpo <- prop.table(table(cleanedTrainData[cleanedTrainData$SibSp > 0,]$Survived))
+print(prop_with_SibSpo)
+
+```
+
+Now we know, that we have chosen correct feature. Now let's fit a model using various machine learning models. There are multiple algorithms for classification of the target variable. To have a better accuracy, we blend multiple models. The models which we are using here are Logistic Regression, Decision Tree, Support Vector Machine and Neural Network.
+
+```{r fitting a logistic model}
+
+set.seed(1)
+randomized_Data <-cleanedTrainData[sample(1:nrow(cleanedTrainData),nrow(cleanedTrainData)),]
+split_limit <- round(nrow(cleanedTrainData)*0.7)
+
+train_data <- randomized_Data[1:split_limit,]
+validation_data <- randomized_Data[(split_limit+1):nrow(cleanedTrainData),]
+actual_output <- validation_data[,1]
+validation_data <- validation_data[,-1]
+
+Logistic_classifier_model <- glm(Survived ~ ., data = train_data,family = binomial,maxit = 100)
+summary(Logistic_classifier_model)
+
+predicted_output_Logistic_prob <- predict.glm(Logistic_classifier_model,newdata = validation_data,type = "response")
+
+predicted_output_Logistic <- as.numeric(predicted_output_Logistic_prob >= 0.5)
+
+confusion_matrix_Logistic <- table(predicted_output_Logistic,actual_output)
+print(confusion_matrix_Logistic)    
+
+TN_log <- confusion_matrix_Logistic[1,1]
+FN_log <- confusion_matrix_Logistic[1,2]
+FP_log <- confusion_matrix_Logistic[2,1]
+TP_log <- confusion_matrix_Logistic[2,2]
+
+accuracy_log <- (TP_log+TN_log)/(TP_log+TN_log+FP_log+FN_log)
+precision_log <- TP_log/(TP_log+FP_log)
+recall_log <- TP_log/(TP_log+FN_log)
+F1_log <- 2*TP_log/(2*TP_log+FP_log+FN_log)
+
+```
+Another algorithm for the classification of the two classes is Decision tree model. This model applies simple decision making rules to the parameter and hence creates a tree for the same. This model is more likely to perform good on the datasets where target variable is related lineraly with the attributes.
+
+```{r fitting a decision tree model}
+
+require(rpart)
+
+Rpart_Classifier_model <- rpart(Survived ~ ., data = train_data, method = "class")
+summary(Rpart_Classifier_model)
+predicted_output_RPart <- predict(Rpart_Classifier_model,newdata = validation_data)
+predicted_output_RPart_prob <- predicted_output_RPart[,2]
+
+predicted_output_RPart <- as.numeric(predicted_output_RPart_prob >= 0.5)
+
+confusion_matrix_RPart <- table(predicted_output_RPart,actual_output)
+print(confusion_matrix_RPart)
+
+TN_RPart <- confusion_matrix_RPart[1,1]
+FN_RPart <- confusion_matrix_RPart[1,2]
+FP_RPart <- confusion_matrix_RPart[2,1]
+TP_RPart <- confusion_matrix_RPart[2,2]
+
+accuracy_RPart <- (TP_RPart+TN_RPart)/(TP_RPart+TN_RPart+FP_RPart+FN_RPart)
+precision_RPart <- TP_RPart/(TP_RPart+FP_RPart)
+recall_RPart <- TP_RPart/(TP_RPart+FN_RPart)
+F1_RPart <- 2*TP_RPart/(2*TP_RPart+FP_RPart+FN_RPart)
+
+
+```
+Unlike Logistic regression, SVM is a linear classifier tool yet very effective. It is based on the assumption that each data point is uniquely seperable if it has infinite dimensions. It maps each attributes to a different dimensions and creates a weighted sum of data points to create a maximum marigin boundary in each dimension.
+
+```{r fitting a SVM model}
+
+require(e1071)
+
+SVM_Classifier_model <- svm(Survived ~ ., data = train_data)
+summary(SVM_Classifier_model)
+predicted_output_SVM_prob <- predict(SVM_Classifier_model, newdata = validation_data)
+
+predicted_output_SVM <- as.numeric(predicted_output_Logistic_prob >= 0.5)
+
+confusion_matrix_SVM <- table(predicted_output_SVM,actual_output)
+print(confusion_matrix_SVM)
+
+TN_SVM <- confusion_matrix_SVM[1,1]
+FN_SVM <- confusion_matrix_SVM[1,2]
+FP_SVM <- confusion_matrix_SVM[2,1]
+TP_SVM <- confusion_matrix_SVM[2,2]
+
+accuracy_SVM <- (TP_SVM+TN_SVM)/(TP_SVM+TN_SVM+FP_SVM+FN_SVM)
+precision_SVM <- TP_SVM/(TP_SVM+FP_SVM)
+recall_SVM <- TP_SVM/(TP_SVM+FN_SVM)
+F1_SVM <- 2*TP_SVM/(2*TP_SVM+FP_SVM+FN_SVM)
+
+
+```
+
+When it comes to non linear features, Neural networks are more effective as compared to the linear algorithm. Unlike previous algorithms, for neural network it becomes effective to normalize the data. An un-normalized data will lead to the hinderance of the weights and will make optimization of the cost function ineffective. Here we have decided to use two hidden layers with hidden units 5 and 3 respectively.
+
+```{r fitting a neural model}
+require(neuralnet)
+randomized_Data_NN <- randomized_Data
+randomized_Data_NN[which(randomized_Data_NN$Sex == "male"),]$Sex <- 1
+randomized_Data_NN[which(randomized_Data_NN$Sex == "female"),]$Sex <- 0
+randomized_Data_NN <- apply(randomized_Data_NN,2,as.numeric)
+max_data <- apply(randomized_Data_NN,2,max)
+min_data <- apply(randomized_Data_NN,2,min)
+
+randomized_normal_Data <- as.data.frame(scale(randomized_Data_NN,center = min_data,scale = (max_data - min_data)))
+
+train_normal_data <- randomized_normal_Data[1:split_limit,]
+validation_normal_data <- randomized_normal_Data[(split_limit+1):nrow(cleanedTrainData),]
+
+neuralnetModel <- neuralnet(Survived ~ Pclass+Sex+Age+SibSp+Parch+FamilyClass, data = train_normal_data,hidden = c(5,3),linear.output = TRUE)
+plot(neuralnetModel)
+
+predict_NN_prob = compute(neuralnetModel,validation_normal_data[,-1])$net.result
+predict_NN <- as.numeric(predict_NN_prob >= 0.5)
+confusion_matrix_NN <- table(predict_NN,actual_output)
+print(confusion_matrix_NN)
+
+TN_NN <- confusion_matrix_NN[1,1]
+FN_NN <- confusion_matrix_NN[1,2]
+FP_NN <- confusion_matrix_NN[2,1]
+TP_NN <- confusion_matrix_NN[2,2]
+
+accuracy_NN <- (TP_NN+TN_NN)/(TP_NN+TN_NN+FP_NN+FN_NN)
+precision_NN <- TP_NN/(TP_NN+FP_NN)
+recall_NN <- TP_NN/(TP_NN+FN_NN)
+F1_NN <- 2*TP_NN/(2*TP_NN+FP_NN+FN_NN)
+
+```
+Now Due to inefficiency of each algorithm over some special kind of data points, blending of the models will be a good choice in order to predict such data points. However this method doesn't guarantee that it will cover all the data points which are affected due to the ineffciency of algorithms. In our case we are blending the results of the four algorithms. There are multiple methods of blending the probabilities. Here we are taking the mean of the probabilities which is simplest of the form.
+
+```{r checking effect of blending on CV dataset}
+
+sum_prob <- predict_NN_prob+predicted_output_Logistic_prob+predicted_output_RPart_prob+predicted_output_SVM_prob
+avg_prob <- sum_prob/4
+predicted_output <- as.numeric(avg_prob >= 0.5)
+confusion_matrix <- table(predicted_output,actual_output)
+print(confusion_matrix)
+
+TN <- confusion_matrix[1,1]
+FN <- confusion_matrix[1,2]
+FP <- confusion_matrix[2,1]
+TP <- confusion_matrix[2,2]
+
+accuracy <- (TP+TN)/(TP+TN+FP+FN)
+precision <- TP/(TP+FP)
+recall <- TP/(TP+FN)
+F1 <- 2*TP/(2*TP+FP+FN)
+
+```
+
+## Comparative Analysis of each model on basis of different metrics
+
+Following lines of codes print different parameters for each models designed above and hence we can compare the different models depending upon the different applications. Here we are creating a dataframe which contains summary of this metrics.
+
+```{r printing the metrics for models}
+require(knitr)
+summary_table <- NULL
+
+col_names <- c("Model","Accuracy","Precision","Recall","F1")
+log_row <- c("Logistic",accuracy_log,precision_log,recall_log,F1_log)
+rpart_row <- c("Decision Tree",accuracy_RPart,precision_RPart,recall_RPart,F1_RPart)
+svm_row <- c("SVM",accuracy_SVM,precision_SVM,recall_SVM,F1_SVM)
+NN_row <- c("Neural Networks",accuracy_NN,precision_NN,recall_NN,F1_NN)
+blended_row <- c("Blended Model",accuracy,precision,recall,F1)
+
+summary_table <- rbind(summary_table,log_row,rpart_row,svm_row,NN_row,blended_row)
+colnames(summary_table) <- col_names
+print(as.data.frame(summary_table))
+```
+Here we can see that our blended model performs better than other models in every aspect. The model can be further refined with other learning aspects blended with it. Metric *Accuracy* depicts how many of the data points are correctly classified. The parameter *precision* demonstrates that out of the total people who survived actually, how many of them were correctly labeled as survived by our algorithm. Similarly parameter *recall* tells that out the people who were labeled survived by our algorithm, how many actually survived. For a machine learning algorithm, these two feature *precision* and *recall* both are important. The collective effect of these parameters is demonstrated by *F1 Score*. We can see from F1 Score that all methods except Blended model has similar score. And as expected, Blended model performs little better over these models. 
+Now let's test our blended model on the *test dataset* as shown below.
+
+```{r prediction for the testdata}
+#prediction on logistic model
+predicted_output_Logistic_test_prob <- predict.glm(Logistic_classifier_model,newdata = cleanedTestData,type = "response")
+
+#prediction on decision tree model
+predicted_output_RPart_test <- predict(Rpart_Classifier_model,newdata = cleanedTestData)
+predicted_output_RPart_test_prob <- predicted_output_RPart_test[,2]
+
+#prediction on SVM model
+predicted_output_SVM_test_prob <- predict(SVM_Classifier_model, newdata = cleanedTestData)
+
+#prediction on NN model
+testData_NN <- cleanedTestData
+testData_NN[which(testData_NN$Sex == "male"),]$Sex <- 1
+testData_NN[which(testData_NN$Sex == "female"),]$Sex <- 0
+testData_NN <- apply(testData_NN,2,as.numeric)
+max_data_test <- apply(testData_NN,2,max)
+min_data_test <- apply(testData_NN,2,min)
+
+normal_testData <- as.data.frame(scale(testData_NN,center = min_data_test,scale = (max_data_test - min_data_test)))
+
+predict_NN_test_prob = compute(neuralnetModel,normal_testData)$net.result
+
+# Blending the results
+sum_test_prob <- predict_NN_test_prob+predicted_output_Logistic_test_prob+predicted_output_RPart_test_prob+predicted_output_SVM_test_prob
+avg_test_prob <- sum_test_prob/4
+predicted_output_test <- as.numeric(avg_test_prob >= 0.5)
+testData_predicted <- cbind(testData,predicted_output_test)
+head(testData_predicted)
+```
